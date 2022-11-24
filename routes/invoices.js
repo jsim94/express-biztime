@@ -67,20 +67,41 @@ router.post("/", async (req, res, next) => {
 router.put("/:id", async (req, res, next) => {
   try {
     const id = req.params.id;
-    const { amt } = req.body;
+    let { amt, paid } = req.body;
+
+    const search = await db.query(
+      `SELECT *
+       FROM invoices
+       WHERE id = $1`,
+      [id]
+    );
+    const invoice = search.rows[0];
+    if (!invoice) throw new ExpressError(`Invoice with code ${id} not found.`, 404);
+
+    let toPay = invoice.paid;
+    let paidDate = invoice.paid_date;
+
+    if (amt === undefined) amt = invoice.amt;
+
+    if (paid !== undefined) {
+      if (paid && !toPay) {
+        toPay = true;
+        paidDate = new Date();
+      } else if (!paid && invoice.paid) {
+        toPay = false;
+        paidDate = null;
+      }
+    }
     const result = await db.query(
       `UPDATE invoices
-       SET amt = $1
-       WHERE id = $2
+       SET amt = $1, paid = $2, paid_date = $3
+       WHERE id = $4
        RETURNING id, comp_code, amt, paid, add_date, paid_date`,
-      [amt, id]
+      [amt, toPay, paidDate, id]
     );
 
-    if (result.rows.length === 0) throw new ExpressError(`Invoice with id ${id} not found.`, 404);
-
-    return res.json({ invoice: result.rows });
+    return res.json({ invoice: result.rows[0] });
   } catch (e) {
-    console.log(e.stack);
     return next(e);
   }
 });
@@ -95,11 +116,8 @@ router.delete("/:id", async (req, res, next) => {
       [id]
     );
 
-    if (result.rows.length === 0) throw new ExpressError(`Invoice with code ${id} not found.`, 404);
-
     return res.json({ status: "deleted" });
   } catch (e) {
-    console.log(e);
     return next(e);
   }
 });
